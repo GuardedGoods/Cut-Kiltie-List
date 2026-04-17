@@ -249,16 +249,26 @@ else:
     st.subheader("Print Cut List")
     st.caption("Use Ctrl+P / Cmd+P to print. This section is designed for clean printing.")
 
-    # Aggregate by leather + height
-    print_agg: dict[tuple[str, str], int] = Counter()
+    # Aggregate by leather (primary grouping), with heights as sub-detail
+    leather_print: dict[str, dict] = defaultdict(lambda: {"quantity": 0, "heights": Counter()})
     for item in kiltie_items:
-        key = (item["leather"], item["height"] or "Not specified")
-        print_agg[key] += item["quantity"]
+        key = item["leather"]
+        leather_print[key]["quantity"] += item["quantity"]
+        h = item["height"] or "Not specified"
+        leather_print[key]["heights"][h] += item["quantity"]
 
-    # Build a clean printable table
+    # Sort by leather name for consistent cutting order
+    sorted_print = sorted(leather_print.items(), key=lambda x: x[0])
+
+    # Build rows for the dataframe view
     print_rows = []
-    for (leather, height), qty in sorted(print_agg.items(), key=lambda x: (-x[1], x[0])):
-        print_rows.append({"Qty": qty, "Leather": leather, "Height": height})
+    for leather, info in sorted_print:
+        height_parts = [f"{h} x{c}" for h, c in sorted(info["heights"].items())]
+        print_rows.append({
+            "Leather": leather,
+            "Total Qty": info["quantity"],
+            "Heights": ", ".join(height_parts),
+        })
 
     print_df = pd.DataFrame(print_rows)
 
@@ -318,10 +328,16 @@ else:
         unsafe_allow_html=True,
     )
 
-    # Build the printable HTML table
-    table_html = "<table><thead><tr><th>Qty</th><th>Leather</th><th>Height</th></tr></thead><tbody>"
-    for row in print_rows:
-        table_html += f"<tr><td><strong>{row['Qty']}</strong></td><td>{row['Leather']}</td><td>{row['Height']}</td></tr>"
+    # Build the printable HTML table — grouped by leather
+    table_html = "<table><thead><tr><th>Leather</th><th>Qty</th><th>Heights</th></tr></thead><tbody>"
+    for leather, info in sorted_print:
+        height_parts = [f"{h} x{c}" for h, c in sorted(info["heights"].items())]
+        height_str = ", ".join(height_parts)
+        table_html += (
+            f"<tr><td><strong>{leather}</strong></td>"
+            f"<td>{info['quantity']}</td>"
+            f"<td>{height_str}</td></tr>"
+        )
     table_html += "</tbody></table>"
 
     st.markdown(
