@@ -145,6 +145,10 @@ for p in products:
             ):
                 color = t
 
+        # Get first product image
+        images = p.get("images", [])
+        image_url = images[0].get("src", "") if images else ""
+
         kiltie_products[p["id"]] = {
             "title": title,
             "tannery": tannery,
@@ -153,6 +157,7 @@ for p in products:
             "tags": tag_list,
             "price": p.get("variants", [{}])[0].get("price", "0"),
             "inventory": p.get("variants", [{}])[0].get("inventory_quantity", 0),
+            "image_url": image_url,
         }
 
 # --- Filter orders ---
@@ -216,6 +221,7 @@ for o in filtered_orders:
                 "color": prod_info.get("color", ""),
                 "quantity": li.get("quantity", 1),
                 "price": float(li.get("price", 0)),
+                "image_url": prod_info.get("image_url", ""),
             })
 
 # ===================================================================
@@ -250,12 +256,14 @@ else:
     st.caption("Use Ctrl+P / Cmd+P to print. This section is designed for clean printing.")
 
     # Aggregate by leather (primary grouping), with heights as sub-detail
-    leather_print: dict[str, dict] = defaultdict(lambda: {"quantity": 0, "heights": Counter()})
+    leather_print: dict[str, dict] = defaultdict(lambda: {"quantity": 0, "heights": Counter(), "image_url": ""})
     for item in kiltie_items:
         key = item["leather"]
         leather_print[key]["quantity"] += item["quantity"]
         h = item["height"] or "Not specified"
         leather_print[key]["heights"][h] += item["quantity"]
+        if item.get("image_url") and not leather_print[key]["image_url"]:
+            leather_print[key]["image_url"] = item["image_url"]
 
     # Sort by leather name for consistent cutting order
     sorted_print = sorted(leather_print.items(), key=lambda x: x[0])
@@ -328,13 +336,16 @@ else:
         unsafe_allow_html=True,
     )
 
-    # Build the printable HTML table — grouped by leather
-    table_html = "<table><thead><tr><th>Leather</th><th>Qty</th><th>Heights</th></tr></thead><tbody>"
+    # Build the printable HTML table — grouped by leather, with thumbnail
+    table_html = "<table><thead><tr><th style='width:60px;'></th><th>Leather</th><th>Qty</th><th>Heights</th></tr></thead><tbody>"
     for leather, info in sorted_print:
         height_parts = [f"{h} x{c}" for h, c in sorted(info["heights"].items())]
         height_str = ", ".join(height_parts)
+        img = info.get("image_url", "")
+        img_td = f"<img src='{img}' style='width:50px;height:50px;object-fit:cover;border-radius:4px;'>" if img else ""
         table_html += (
-            f"<tr><td><strong>{leather}</strong></td>"
+            f"<tr><td>{img_td}</td>"
+            f"<td><strong>{leather}</strong></td>"
             f"<td>{info['quantity']}</td>"
             f"<td>{height_str}</td></tr>"
         )
@@ -366,6 +377,7 @@ else:
         "tannery": "",
         "leather_type": "",
         "color": "",
+        "image_url": "",
         "heights": Counter(),
         "orders": [],
         "customers": [],
@@ -378,6 +390,8 @@ else:
         leather_agg[key]["color"] = item["color"]
         leather_agg[key]["orders"].append(f"#{item['order']}")
         leather_agg[key]["customers"].append(item["customer"])
+        if item.get("image_url") and not leather_agg[key]["image_url"]:
+            leather_agg[key]["image_url"] = item["image_url"]
         if item["height"]:
             leather_agg[key]["heights"][item["height"]] += item["quantity"]
 
@@ -419,10 +433,20 @@ else:
             border_color = "#27ae60"
             bg = "rgba(39, 174, 96, 0.04)"
 
+        img_url = info.get("image_url", "")
+        img_html = (
+            f"<img src='{img_url}' style='width:65px;height:65px;object-fit:cover;"
+            f"border-radius:6px;margin-right:14px;flex-shrink:0;'>"
+            if img_url else ""
+        )
+
         st.markdown(
             f"<div style='border-left: 5px solid {border_color}; "
             f"padding: 12px 16px; margin-bottom: 8px; "
             f"background: {bg}; border-radius: 4px;'>"
+            f"<div style='display:flex; align-items:center;'>"
+            f"{img_html}"
+            f"<div style='flex:1;'>"
             f"<div style='display:flex; justify-content:space-between; align-items:baseline;'>"
             f"<div>"
             f"<span style='font-size: 1.4em; font-weight: bold; color:{border_color};'>{qty}x</span> "
@@ -434,6 +458,7 @@ else:
             f"{detail_line}</div>"
             f"<div style='margin-top: 3px; font-size: 0.8em; color: #888;'>"
             f"Orders: {order_list} -- {customer_list}</div>"
+            f"</div></div>"
             f"</div>",
             unsafe_allow_html=True,
         )
