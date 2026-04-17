@@ -2,7 +2,7 @@
 Kiltie Cut List -- Live production planning for Guarded Goods.
 Pulls unfulfilled orders from Shopify, extracts Boot Kiltie line items
 with leather type and height, and aggregates into a cutting guide.
-Orders disappear as they are fulfilled in Shopify.
+Mobile-first. No customer data surfaced in the UI.
 """
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ from urllib.parse import urlencode
 import re
 
 import pandas as pd
-import plotly.express as px
 import requests
 import streamlit as st
 
 st.set_page_config(
-    page_title="Kiltie Cut List",
+    page_title="Cut List -- Guarded Goods",
     page_icon=None,
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 # ===================================================================
@@ -88,28 +88,292 @@ def get_orders(days: int = 60) -> list[dict]:
 
 
 # ===================================================================
-# Page
+# Branded CSS (Guarded Goods palette, mobile-first)
 # ===================================================================
 
-st.title("Kiltie Cut List")
-st.caption("Live from Shopify -- updates as you fulfill orders.")
+st.markdown(
+    """
+    <style>
+    :root {
+        --gg-bg:       #faf7f2;
+        --gg-surface:  #ffffff;
+        --gg-ink:      #1a1a1a;
+        --gg-muted:    #6b6b6b;
+        --gg-line:     #e5dfd4;
+        --gg-accent:   #6b4423;
+        --gg-urgent:   #8b2e2e;
+        --gg-warn:     #a67c2a;
+        --gg-ok:       #4a6b3a;
+        --gg-font:     "Inter", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+    }
 
-# Controls row
-ctrl1, ctrl2, ctrl3 = st.columns([2, 1, 1])
-with ctrl1:
+    html, body, [data-testid="stAppViewContainer"],
+    [data-testid="stApp"], .main, .block-container {
+        background: var(--gg-bg) !important;
+        color: var(--gg-ink);
+        font-family: var(--gg-font);
+    }
+
+    .block-container {
+        padding-top: 1.25rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 820px !important;
+    }
+
+    /* Branded header */
+    .gg-eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--gg-muted);
+        font-weight: 600;
+        margin-bottom: 2px;
+    }
+    .gg-title {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--gg-ink);
+        margin: 0 0 4px 0;
+    }
+    .gg-subtitle {
+        font-size: 13px;
+        color: var(--gg-muted);
+        margin-bottom: 18px;
+    }
+
+    /* Metric tiles */
+    [data-testid="stMetric"] {
+        background: var(--gg-surface);
+        border: 1px solid var(--gg-line);
+        border-radius: 2px;
+        padding: 12px 14px;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 10px !important;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--gg-muted) !important;
+        font-weight: 600;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 26px !important;
+        font-weight: 700 !important;
+        color: var(--gg-ink) !important;
+    }
+
+    /* Leather card */
+    .gg-card {
+        background: var(--gg-surface);
+        border: 1px solid var(--gg-line);
+        border-left: 4px solid var(--gg-ok);
+        border-radius: 2px;
+        padding: 14px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+    .gg-card.qty-warn  { border-left-color: var(--gg-warn); }
+    .gg-card.qty-urgent { border-left-color: var(--gg-urgent); }
+
+    .gg-thumb {
+        width: 88px;
+        height: 88px;
+        object-fit: cover;
+        border-radius: 2px;
+        flex-shrink: 0;
+        background: var(--gg-bg);
+        border: 1px solid var(--gg-line);
+    }
+    .gg-thumb-empty {
+        width: 88px;
+        height: 88px;
+        border-radius: 2px;
+        flex-shrink: 0;
+        background: var(--gg-bg);
+        border: 1px solid var(--gg-line);
+    }
+
+    .gg-body { flex: 1; min-width: 0; }
+
+    .gg-row-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 10px;
+    }
+    .gg-leather {
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--gg-ink);
+        line-height: 1.25;
+        word-break: break-word;
+    }
+    .gg-qty {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--gg-accent);
+        line-height: 1;
+        white-space: nowrap;
+    }
+    .gg-qty .x {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--gg-muted);
+        margin-left: 2px;
+    }
+
+    .gg-heights {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--gg-ink);
+        margin-top: 6px;
+    }
+    .gg-heights .h-pill {
+        display: inline-block;
+        background: var(--gg-bg);
+        border: 1px solid var(--gg-line);
+        border-radius: 2px;
+        padding: 2px 8px;
+        margin: 2px 4px 0 0;
+        font-size: 13px;
+    }
+
+    .gg-meta {
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--gg-muted);
+        margin-top: 6px;
+    }
+
+    /* Per-order rows inside expander */
+    .gg-order-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--gg-line);
+        color: var(--gg-ink);
+    }
+    .gg-order-row:last-child { border-bottom: none; }
+    .gg-order-num { color: var(--gg-muted); font-variant-numeric: tabular-nums; }
+
+    /* Streamlit expander -> match GG minimal style */
+    [data-testid="stExpander"] {
+        border: 1px solid var(--gg-line) !important;
+        border-radius: 2px !important;
+        background: var(--gg-surface) !important;
+        margin-top: -8px;
+        margin-bottom: 14px;
+    }
+    [data-testid="stExpander"] summary {
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--gg-muted) !important;
+    }
+
+    /* Controls */
+    [data-testid="stSelectbox"] label,
+    [data-testid="stButton"] button {
+        font-family: var(--gg-font);
+    }
+    [data-testid="stButton"] button[kind="primary"] {
+        background: var(--gg-ink);
+        border: 1px solid var(--gg-ink);
+        color: #fff;
+        border-radius: 2px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 12px;
+    }
+    [data-testid="stButton"] button[kind="primary"]:hover {
+        background: var(--gg-accent);
+        border-color: var(--gg-accent);
+    }
+
+    hr { border-color: var(--gg-line) !important; }
+
+    /* Mobile */
+    @media (max-width: 640px) {
+        .block-container {
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+        .gg-title { font-size: 24px; }
+        .gg-thumb, .gg-thumb-empty { width: 72px; height: 72px; }
+        .gg-leather { font-size: 16px; }
+        .gg-qty { font-size: 26px; }
+        [data-testid="stMetricValue"] { font-size: 22px !important; }
+    }
+
+    /* Print: only the aggregated table */
+    @media print {
+        header, footer, [data-testid="stSidebar"],
+        [data-testid="stToolbar"], [data-testid="stDecoration"],
+        [data-testid="stStatusWidget"], .stDeployButton,
+        [data-testid="manage-app-button"] { display: none !important; }
+
+        .block-container > div > div > div > div { display: none !important; }
+
+        #gg-print, #gg-print * {
+            display: block !important;
+            visibility: visible !important;
+        }
+        #gg-print { position: absolute; top: 0; left: 0; width: 100%; }
+        #gg-print table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12pt;
+        }
+        #gg-print th, #gg-print td {
+            border: 1px solid #333;
+            padding: 8px 10px;
+            text-align: left;
+        }
+        #gg-print th { background: #f0f0f0 !important; font-weight: 700; }
+        #gg-print h2 { font-size: 18pt; margin-bottom: 6px; }
+        #gg-print .print-date { font-size: 10pt; color: #666; margin-bottom: 14px; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ===================================================================
+# Header
+# ===================================================================
+
+st.markdown(
+    """
+    <div class="gg-eyebrow">Guarded Goods</div>
+    <div class="gg-title">Cut List</div>
+    <div class="gg-subtitle">Live from Shopify &middot; updates as orders fulfill.</div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Controls
+c1, c2 = st.columns([3, 1])
+with c1:
     order_filter = st.selectbox(
         "Show",
         ["Unfulfilled orders", "All orders (60 days)", "All orders (90 days)"],
         label_visibility="collapsed",
     )
-with ctrl3:
+with c2:
     if st.button("Refresh", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
 lookup_days = 90 if "90" in order_filter else 60
 
-# --- Load data ---
+# ===================================================================
+# Load + shape data
+# ===================================================================
 
 with st.spinner("Pulling live data from Shopify..."):
     try:
@@ -119,7 +383,6 @@ with st.spinner("Pulling live data from Shopify..."):
         st.error(f"Could not connect to Shopify: {exc}")
         st.stop()
 
-# Build kiltie product lookup
 kiltie_products: dict[int, dict] = {}
 for p in products:
     tags = (p.get("tags", "") or "").lower()
@@ -145,7 +408,6 @@ for p in products:
             ):
                 color = t
 
-        # Get first product image
         images = p.get("images", [])
         image_url = images[0].get("src", "") if images else ""
 
@@ -154,13 +416,10 @@ for p in products:
             "tannery": tannery,
             "leather_type": leather_type,
             "color": color,
-            "tags": tag_list,
             "price": p.get("variants", [{}])[0].get("price", "0"),
             "inventory": p.get("variants", [{}])[0].get("inventory_quantity", 0),
             "image_url": image_url,
         }
-
-# --- Filter orders ---
 
 if "Unfulfilled" in order_filter:
     filtered_orders = [
@@ -176,22 +435,10 @@ else:
     ]
     filter_label = f"all ({lookup_days}d)"
 
-# --- Extract kiltie line items ---
-
 kiltie_items: list[dict] = []
 for o in filtered_orders:
     order_num = o.get("order_number", o["id"])
     order_date = o.get("created_at", "")[:10]
-    customer_name = ""
-    if o.get("customer"):
-        c = o["customer"]
-        customer_name = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
-    if not customer_name:
-        customer_name = o.get("email", "N/A")
-
-    ship_addr = o.get("shipping_address") or {}
-    ship_state = ship_addr.get("province", "")
-    fulfillment_status = o.get("fulfillment_status") or "unfulfilled"
 
     for li in o.get("line_items", []):
         product_id = li.get("product_id")
@@ -211,24 +458,18 @@ for o in filtered_orders:
             kiltie_items.append({
                 "order": order_num,
                 "date": order_date,
-                "customer": customer_name,
-                "state": ship_state,
-                "status": fulfillment_status,
                 "leather": li.get("title", prod_info.get("title", "Unknown")),
                 "height": kiltie_height,
                 "tannery": prod_info.get("tannery", ""),
                 "leather_type": prod_info.get("leather_type", ""),
                 "color": prod_info.get("color", ""),
                 "quantity": li.get("quantity", 1),
-                "price": float(li.get("price", 0)),
                 "image_url": prod_info.get("image_url", ""),
             })
 
 # ===================================================================
 # Display
 # ===================================================================
-
-st.divider()
 
 if not kiltie_items:
     st.success(
@@ -239,139 +480,15 @@ else:
     total_kilties = sum(i["quantity"] for i in kiltie_items)
     unique_leathers = len(set(i["leather"] for i in kiltie_items))
     unique_orders = len(set(i["order"] for i in kiltie_items))
-    total_value = sum(i["price"] * i["quantity"] for i in kiltie_items)
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Kilties to Cut", total_kilties)
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Kilties", total_kilties)
     m2.metric("Leathers", unique_leathers)
     m3.metric("Orders", unique_orders)
-    m4.metric("Value", f"${total_value:,.2f}")
 
-    # ---------------------------------------------------------------
-    # PRINT-READY CUT LIST
-    # ---------------------------------------------------------------
+    st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
 
-    st.divider()
-    st.subheader("Print Cut List")
-    st.caption("Use Ctrl+P / Cmd+P to print. This section is designed for clean printing.")
-
-    # Aggregate by leather (primary grouping), with heights as sub-detail
-    leather_print: dict[str, dict] = defaultdict(lambda: {"quantity": 0, "heights": Counter(), "image_url": ""})
-    for item in kiltie_items:
-        key = item["leather"]
-        leather_print[key]["quantity"] += item["quantity"]
-        h = item["height"] or "Not specified"
-        leather_print[key]["heights"][h] += item["quantity"]
-        if item.get("image_url") and not leather_print[key]["image_url"]:
-            leather_print[key]["image_url"] = item["image_url"]
-
-    # Sort by leather name for consistent cutting order
-    sorted_print = sorted(leather_print.items(), key=lambda x: x[0])
-
-    # Build rows for the dataframe view
-    print_rows = []
-    for leather, info in sorted_print:
-        height_parts = [f"{h} x{c}" for h, c in sorted(info["heights"].items())]
-        print_rows.append({
-            "Leather": leather,
-            "Total Qty": info["quantity"],
-            "Heights": ", ".join(height_parts),
-        })
-
-    print_df = pd.DataFrame(print_rows)
-
-    # Inject CSS that hides everything except this table when printing
-    st.markdown(
-        """
-        <style>
-        @media print {
-            /* Hide Streamlit chrome */
-            header, footer, [data-testid="stSidebar"],
-            [data-testid="stToolbar"], [data-testid="stDecoration"],
-            [data-testid="stStatusWidget"], .stDeployButton,
-            [data-testid="manage-app-button"] {
-                display: none !important;
-            }
-            /* Hide everything by default */
-            section.main > div > div > div > div {
-                display: none !important;
-            }
-            /* Show only the print section */
-            #print-section, #print-section * {
-                display: block !important;
-                visibility: visible !important;
-            }
-            #print-section {
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 100%;
-            }
-            #print-section table {
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 14pt;
-            }
-            #print-section th, #print-section td {
-                border: 1px solid #333;
-                padding: 8px 12px;
-                text-align: left;
-            }
-            #print-section th {
-                background: #f0f0f0 !important;
-                font-weight: bold;
-            }
-            #print-section h2 {
-                margin-bottom: 10px;
-                font-size: 18pt;
-            }
-            #print-section .print-date {
-                font-size: 10pt;
-                color: #666;
-                margin-bottom: 16px;
-            }
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Build the printable HTML table — grouped by leather, with thumbnail
-    table_html = "<table><thead><tr><th style='width:60px;'></th><th>Leather</th><th>Qty</th><th>Heights</th></tr></thead><tbody>"
-    for leather, info in sorted_print:
-        height_parts = [f"{h} x{c}" for h, c in sorted(info["heights"].items())]
-        height_str = ", ".join(height_parts)
-        img = info.get("image_url", "")
-        img_td = f"<img src='{img}' style='width:50px;height:50px;object-fit:cover;border-radius:4px;'>" if img else ""
-        table_html += (
-            f"<tr><td>{img_td}</td>"
-            f"<td><strong>{leather}</strong></td>"
-            f"<td>{info['quantity']}</td>"
-            f"<td>{height_str}</td></tr>"
-        )
-    table_html += "</tbody></table>"
-
-    st.markdown(
-        f"""
-        <div id="print-section">
-            <h2>Kiltie Cut List</h2>
-            <div class="print-date">{datetime.now().strftime('%B %d, %Y')} | {total_kilties} kilties across {unique_orders} orders</div>
-            {table_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Also show as a Streamlit dataframe for on-screen use
-    st.dataframe(print_df, use_container_width=True, hide_index=True)
-
-    # ---------------------------------------------------------------
-    # DETAILED CUT LIST (cards)
-    # ---------------------------------------------------------------
-
-    st.divider()
-    st.subheader("Detailed Cut List")
-
+    # Aggregate by leather
     leather_agg: dict[str, dict] = defaultdict(lambda: {
         "quantity": 0,
         "tannery": "",
@@ -379,8 +496,7 @@ else:
         "color": "",
         "image_url": "",
         "heights": Counter(),
-        "orders": [],
-        "customers": [],
+        "per_order": [],
     })
     for item in kiltie_items:
         key = item["leather"]
@@ -388,168 +504,122 @@ else:
         leather_agg[key]["tannery"] = item["tannery"]
         leather_agg[key]["leather_type"] = item["leather_type"]
         leather_agg[key]["color"] = item["color"]
-        leather_agg[key]["orders"].append(f"#{item['order']}")
-        leather_agg[key]["customers"].append(item["customer"])
         if item.get("image_url") and not leather_agg[key]["image_url"]:
             leather_agg[key]["image_url"] = item["image_url"]
         if item["height"]:
             leather_agg[key]["heights"][item["height"]] += item["quantity"]
+        leather_agg[key]["per_order"].append({
+            "order": item["order"],
+            "qty": item["quantity"],
+            "height": item["height"] or "--",
+        })
 
     sorted_leathers = sorted(leather_agg.items(), key=lambda x: -x[1]["quantity"])
 
     for leather_name, info in sorted_leathers:
         qty = info["quantity"]
-        order_list = ", ".join(sorted(set(info["orders"])))
-        customer_list = ", ".join(sorted(set(info["customers"])))
-        tannery = info["tannery"]
-        ltype = info["leather_type"]
-        color_name = info["color"]
         heights = info["heights"]
 
-        # Height display
-        if heights:
-            height_str = ", ".join(f"{h} x{c}" for h, c in sorted(heights.items()))
-        else:
-            height_str = "No height specified"
-
-        # Detail line
-        detail_parts = []
-        if tannery:
-            detail_parts.append(tannery)
-        if ltype:
-            detail_parts.append(ltype)
-        if color_name:
-            detail_parts.append(color_name)
-        detail_line = " / ".join(detail_parts) if detail_parts else ""
-
-        # Border color by quantity
         if qty >= 3:
-            border_color = "#c0392b"
-            bg = "rgba(192, 57, 43, 0.04)"
+            card_class = "gg-card qty-urgent"
         elif qty >= 2:
-            border_color = "#d4a017"
-            bg = "rgba(212, 160, 23, 0.04)"
+            card_class = "gg-card qty-warn"
         else:
-            border_color = "#27ae60"
-            bg = "rgba(39, 174, 96, 0.04)"
+            card_class = "gg-card"
+
+        if heights:
+            height_pills = "".join(
+                f"<span class='h-pill'>{h} &middot; {c}x</span>"
+                for h, c in sorted(heights.items())
+            )
+        else:
+            height_pills = "<span class='h-pill'>No height specified</span>"
+
+        meta_parts = [
+            p for p in (info["tannery"], info["leather_type"], info["color"]) if p
+        ]
+        meta_line = " &middot; ".join(meta_parts)
 
         img_url = info.get("image_url", "")
-        img_html = (
-            f"<img src='{img_url}' style='width:65px;height:65px;object-fit:cover;"
-            f"border-radius:6px;margin-right:14px;flex-shrink:0;'>"
-            if img_url else ""
+        thumb = (
+            f"<img class='gg-thumb' src='{img_url}' alt=''>"
+            if img_url else "<div class='gg-thumb-empty'></div>"
         )
 
         st.markdown(
-            f"<div style='border-left: 5px solid {border_color}; "
-            f"padding: 12px 16px; margin-bottom: 8px; "
-            f"background: {bg}; border-radius: 4px;'>"
-            f"<div style='display:flex; align-items:center;'>"
-            f"{img_html}"
-            f"<div style='flex:1;'>"
-            f"<div style='display:flex; justify-content:space-between; align-items:baseline;'>"
-            f"<div>"
-            f"<span style='font-size: 1.4em; font-weight: bold; color:{border_color};'>{qty}x</span> "
-            f"<span style='font-size: 1.1em; font-weight: 600;'>{leather_name}</span>"
-            f"</div>"
-            f"<div style='font-size: 0.95em;'>{height_str}</div>"
-            f"</div>"
-            f"<div style='margin-top: 4px; font-size: 0.85em; color: #666;'>"
-            f"{detail_line}</div>"
-            f"<div style='margin-top: 3px; font-size: 0.8em; color: #888;'>"
-            f"Orders: {order_list} -- {customer_list}</div>"
-            f"</div></div>"
-            f"</div>",
+            f"""
+            <div class="{card_class}">
+                {thumb}
+                <div class="gg-body">
+                    <div class="gg-row-top">
+                        <div class="gg-leather">{leather_name}</div>
+                        <div class="gg-qty">{qty}<span class="x">x</span></div>
+                    </div>
+                    <div class="gg-heights">{height_pills}</div>
+                    {f'<div class="gg-meta">{meta_line}</div>' if meta_line else ''}
+                </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
-    # ---------------------------------------------------------------
-    # Chart
-    # ---------------------------------------------------------------
-
-    st.divider()
-    cut_df = pd.DataFrame([
-        {"Leather": name, "Quantity": info["quantity"], "Tannery": info["tannery"] or "Unknown"}
-        for name, info in sorted_leathers
-    ])
-    fig = px.bar(
-        cut_df,
-        x="Quantity",
-        y="Leather",
-        orientation="h",
-        color="Tannery",
-        title="Kilties to Cut",
-    )
-    fig.update_layout(
-        yaxis=dict(autorange="reversed"),
-        height=max(300, len(cut_df) * 40),
-    )
-    st.plotly_chart(fig, use_container_width=True)
+        with st.expander(f"Per-order breakdown ({len(info['per_order'])})"):
+            rows_html = "".join(
+                f"<div class='gg-order-row'>"
+                f"<span class='gg-order-num'>#{row['order']}</span>"
+                f"<span>{row['qty']}x &middot; {row['height']}</span>"
+                f"</div>"
+                for row in sorted(info["per_order"], key=lambda r: str(r["order"]))
+            )
+            st.markdown(rows_html, unsafe_allow_html=True)
 
     # ---------------------------------------------------------------
-    # Full order detail table
+    # Print view (collapsed; desktop + print only)
     # ---------------------------------------------------------------
+    with st.expander("Print view"):
+        table_html = (
+            "<table><thead><tr>"
+            "<th style='width:60px;'></th><th>Leather</th><th>Qty</th><th>Heights</th>"
+            "</tr></thead><tbody>"
+        )
+        for leather_name, info in sorted(leather_agg.items(), key=lambda x: x[0]):
+            height_parts = [f"{h} x{c}" for h, c in sorted(info["heights"].items())]
+            height_str = ", ".join(height_parts) if height_parts else "--"
+            img = info.get("image_url", "")
+            img_td = (
+                f"<img src='{img}' style='width:50px;height:50px;"
+                f"object-fit:cover;border-radius:2px;'>" if img else ""
+            )
+            table_html += (
+                f"<tr><td>{img_td}</td>"
+                f"<td><strong>{leather_name}</strong></td>"
+                f"<td>{info['quantity']}</td>"
+                f"<td>{height_str}</td></tr>"
+            )
+        table_html += "</tbody></table>"
 
-    st.divider()
-    st.subheader("Order Details")
+        st.markdown(
+            f"""
+            <div id="gg-print">
+                <h2>Kiltie Cut List</h2>
+                <div class="print-date">{datetime.now().strftime('%B %d, %Y')}
+                    | {total_kilties} kilties across {unique_orders} orders</div>
+                {table_html}
+            </div>
+            <p style="font-size:12px;color:var(--gg-muted);margin-top:10px;">
+                Use Ctrl+P / Cmd+P to print. Only this table will print.
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    detail_df = pd.DataFrame(kiltie_items)
-    detail_df = detail_df.rename(columns={
-        "order": "Order #",
-        "date": "Date",
-        "customer": "Customer",
-        "state": "State",
-        "status": "Status",
-        "leather": "Leather",
-        "height": "Height",
-        "tannery": "Tannery",
-        "quantity": "Qty",
-        "price": "Price",
-    })
-    display_cols = [
-        "Order #", "Date", "Customer", "State", "Status",
-        "Leather", "Height", "Tannery", "Qty", "Price",
-    ]
-    available_cols = [c for c in display_cols if c in detail_df.columns]
-    st.dataframe(
-        detail_df[available_cols].sort_values("Order #", ascending=False),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-# ===================================================================
-# Kiltie Inventory
-# ===================================================================
-
-st.divider()
-with st.expander("Kiltie Inventory Snapshot"):
-    if kiltie_products:
-        inv_rows = []
-        for pid, info in kiltie_products.items():
-            inv_rows.append({
-                "Leather": info["title"],
-                "Tannery": info["tannery"],
-                "Type": info["leather_type"],
-                "Price": f"${float(info['price']):,.2f}",
-                "In Stock": info["inventory"],
-            })
-        inv_df = pd.DataFrame(inv_rows).sort_values("In Stock", ascending=True)
-
-        oos = inv_df[inv_df["In Stock"] <= 0]
-        low = inv_df[(inv_df["In Stock"] > 0) & (inv_df["In Stock"] <= 3)]
-
-        ic1, ic2, ic3 = st.columns(3)
-        ic1.metric("Total Kiltie SKUs", len(inv_df))
-        ic2.metric("Out of Stock", len(oos))
-        ic3.metric("Low Stock (3 or less)", len(low))
-
-        st.dataframe(inv_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No kiltie products found.")
-
-st.divider()
-st.caption(
-    f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M')} | "
-    f"Checked {len(filtered_orders)} {filter_label} orders | "
-    f"Data from Shopify Admin API"
+st.markdown(
+    f"""
+    <div style='margin-top:24px;font-size:11px;color:var(--gg-muted);
+                letter-spacing:0.12em;text-transform:uppercase;'>
+        Last refreshed {datetime.now().strftime('%Y-%m-%d %H:%M')}
+        &middot; {len(filtered_orders)} {filter_label} orders
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
