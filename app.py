@@ -511,6 +511,8 @@ for o in filtered_orders:
                 if (prop.get("name", "") or "").strip() == "Kiltie Height":
                     kiltie_height = (prop.get("value", "") or "").strip()
                     break
+            if not kiltie_height:
+                kiltie_height = '6"'  # default when the customer didn't pick one
 
             kiltie_items.append({
                 "order": order_num,
