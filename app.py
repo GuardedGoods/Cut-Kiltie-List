@@ -240,14 +240,6 @@ st.markdown(
         font-size: 13px;
     }
 
-    .gg-meta {
-        font-size: 11px;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: var(--gg-muted);
-        margin-top: 6px;
-    }
-
     /* Streamlit expander -> match GG minimal style */
     [data-testid="stExpander"] {
         border: 1px solid var(--gg-line) !important;
@@ -448,9 +440,6 @@ for o in filtered_orders:
                 "date": order_date,
                 "leather": li.get("title", prod_info.get("title", "Unknown")),
                 "height": kiltie_height,
-                "tannery": prod_info.get("tannery", ""),
-                "leather_type": prod_info.get("leather_type", ""),
-                "color": prod_info.get("color", ""),
                 "quantity": li.get("quantity", 1),
                 "image_url": prod_info.get("image_url", ""),
             })
@@ -479,18 +468,12 @@ else:
     # Aggregate by leather
     leather_agg: dict[str, dict] = defaultdict(lambda: {
         "quantity": 0,
-        "tannery": "",
-        "leather_type": "",
-        "color": "",
         "image_url": "",
         "heights": Counter(),
     })
     for item in kiltie_items:
         key = item["leather"]
         leather_agg[key]["quantity"] += item["quantity"]
-        leather_agg[key]["tannery"] = item["tannery"]
-        leather_agg[key]["leather_type"] = item["leather_type"]
-        leather_agg[key]["color"] = item["color"]
         if item.get("image_url") and not leather_agg[key]["image_url"]:
             leather_agg[key]["image_url"] = item["image_url"]
         if item["height"]:
@@ -512,15 +495,10 @@ else:
         if heights:
             height_pills = "".join(
                 f"<span class='h-pill'>{h} &middot; {c}x</span>"
-                for h, c in sorted(heights.items())
+                for h, c in sorted(heights.items(), key=lambda x: -x[1])
             )
         else:
             height_pills = "<span class='h-pill'>No height specified</span>"
-
-        meta_parts = [
-            p for p in (info["tannery"], info["leather_type"], info["color"]) if p
-        ]
-        meta_line = " &middot; ".join(meta_parts)
 
         img_url = info.get("image_url", "")
         thumb = (
@@ -538,7 +516,6 @@ else:
                         <div class="gg-qty">{qty}<span class="x">x</span></div>
                     </div>
                     <div class="gg-heights">{height_pills}</div>
-                    {f'<div class="gg-meta">{meta_line}</div>' if meta_line else ''}
                 </div>
             </div>
             """,
