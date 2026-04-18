@@ -616,8 +616,7 @@ else:
                         <div class="gg-leather">{name_html}</div>
                         <div class="gg-qty">{qty}<span class="x">x</span></div>
                     </div>
-                    <div class="gg-heights">{height_pills}</div>
-                    {age_html}
+                    <div class="gg-heights">{height_pills}</div>{age_html}
                 </div>
             </div>
             """,
