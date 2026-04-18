@@ -384,7 +384,15 @@ c1, c2 = st.columns([3, 1])
 with c1:
     order_filter = st.selectbox(
         "Show",
-        ["Unfulfilled orders", "All orders (60 days)", "All orders (90 days)"],
+        [
+            "Unfulfilled orders",
+            "Today",
+            "Yesterday",
+            "Last 3 days",
+            "Last 7 days",
+            "All orders (60 days)",
+            "All orders (90 days)",
+        ],
         label_visibility="collapsed",
     )
 with c2:
@@ -392,7 +400,30 @@ with c2:
         st.cache_data.clear()
         st.rerun()
 
-lookup_days = 90 if "90" in order_filter else 60
+# Map filter -> API lookback + optional client-side date window.
+# API lookback is coarse (7/60/90) so cache keys stay small.
+today = date.today()
+if order_filter in ("Today", "Yesterday", "Last 3 days", "Last 7 days"):
+    lookup_days = 8  # buffer so tz-skewed orders on the boundary still pull
+elif "90" in order_filter:
+    lookup_days = 90
+else:
+    lookup_days = 60
+
+if order_filter == "Today":
+    date_min = date_max = today
+elif order_filter == "Yesterday":
+    date_min = date_max = today - timedelta(days=1)
+elif order_filter == "Last 3 days":
+    date_min, date_max = today - timedelta(days=2), today
+elif order_filter == "Last 7 days":
+    date_min, date_max = today - timedelta(days=6), today
+elif "90" in order_filter:
+    date_min, date_max = today - timedelta(days=90), today
+elif "60" in order_filter:
+    date_min, date_max = today - timedelta(days=60), today
+else:
+    date_min = date_max = None  # Unfulfilled filter ignores the date window
 
 # ===================================================================
 # Load + shape data
@@ -452,11 +483,14 @@ if "Unfulfilled" in order_filter:
     ]
     filter_label = "unfulfilled"
 else:
+    dmin = date_min.isoformat() if date_min else ""
+    dmax = date_max.isoformat() if date_max else ""
     filtered_orders = [
         o for o in orders
         if o.get("financial_status") not in ("voided", "refunded")
+        and dmin <= (o.get("created_at", "") or "")[:10] <= dmax
     ]
-    filter_label = f"all ({lookup_days}d)"
+    filter_label = order_filter.lower()
 
 kiltie_items: list[dict] = []
 for o in filtered_orders:
@@ -501,12 +535,11 @@ else:
     unique_leathers = len(set(i["leather"] for i in kiltie_items))
     unique_orders = len(set(i["order"] for i in kiltie_items))
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Kilties", total_kilties)
-    m2.metric("Leathers", unique_leathers)
-    m3.metric("Orders", unique_orders)
-
-    st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
+    with st.expander("Summary", expanded=True):
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Kilties", total_kilties)
+        m2.metric("Leathers", unique_leathers)
+        m3.metric("Orders", unique_orders)
 
     # Aggregate by leather
     leather_agg: dict[str, dict] = defaultdict(lambda: {
