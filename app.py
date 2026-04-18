@@ -248,18 +248,6 @@ st.markdown(
         margin-top: 6px;
     }
 
-    /* Per-order rows inside expander */
-    .gg-order-row {
-        display: flex;
-        justify-content: space-between;
-        font-size: 13px;
-        padding: 6px 0;
-        border-bottom: 1px solid var(--gg-line);
-        color: var(--gg-ink);
-    }
-    .gg-order-row:last-child { border-bottom: none; }
-    .gg-order-num { color: var(--gg-muted); font-variant-numeric: tabular-nums; }
-
     /* Streamlit expander -> match GG minimal style */
     [data-testid="stExpander"] {
         border: 1px solid var(--gg-line) !important;
@@ -496,7 +484,6 @@ else:
         "color": "",
         "image_url": "",
         "heights": Counter(),
-        "per_order": [],
     })
     for item in kiltie_items:
         key = item["leather"]
@@ -508,11 +495,6 @@ else:
             leather_agg[key]["image_url"] = item["image_url"]
         if item["height"]:
             leather_agg[key]["heights"][item["height"]] += item["quantity"]
-        leather_agg[key]["per_order"].append({
-            "order": item["order"],
-            "qty": item["quantity"],
-            "height": item["height"] or "--",
-        })
 
     sorted_leathers = sorted(leather_agg.items(), key=lambda x: -x[1]["quantity"])
 
@@ -562,16 +544,6 @@ else:
             """,
             unsafe_allow_html=True,
         )
-
-        with st.expander(f"Per-order breakdown ({len(info['per_order'])})"):
-            rows_html = "".join(
-                f"<div class='gg-order-row'>"
-                f"<span class='gg-order-num'>#{row['order']}</span>"
-                f"<span>{row['qty']}x &middot; {row['height']}</span>"
-                f"</div>"
-                for row in sorted(info["per_order"], key=lambda r: str(r["order"]))
-            )
-            st.markdown(rows_html, unsafe_allow_html=True)
 
     # ---------------------------------------------------------------
     # Print view (collapsed; desktop + print only)
