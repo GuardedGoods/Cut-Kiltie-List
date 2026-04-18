@@ -7,8 +7,9 @@ Mobile-first. No customer data surfaced in the UI.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
+import html
 import re
 
 import pandas as pd
@@ -173,9 +174,24 @@ st.markdown(
         display: flex;
         align-items: center;
         gap: 14px;
+        cursor: pointer;
+        transition: opacity .18s ease, padding .18s ease;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
     }
     .gg-card.qty-warn  { border-left-color: var(--gg-warn); }
     .gg-card.qty-urgent { border-left-color: var(--gg-urgent); }
+
+    .gg-card.cut {
+        opacity: 0.45;
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+    .gg-card.cut .gg-leather { text-decoration: line-through; }
+    .gg-card.cut .gg-heights,
+    .gg-card.cut .gg-age      { display: none; }
+    .gg-card.cut .gg-thumb,
+    .gg-card.cut .gg-thumb-empty { width: 48px; height: 48px; }
 
     .gg-thumb {
         width: 88px;
@@ -185,6 +201,7 @@ st.markdown(
         flex-shrink: 0;
         background: var(--gg-bg);
         border: 1px solid var(--gg-line);
+        cursor: zoom-in;
     }
     .gg-thumb-empty {
         width: 88px;
@@ -239,6 +256,32 @@ st.markdown(
         margin: 2px 4px 0 0;
         font-size: 13px;
     }
+
+    .gg-age {
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--gg-muted);
+        margin-top: 6px;
+    }
+
+    /* Photo modal (full-screen image on thumbnail tap) */
+    .gg-modal {
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.88);
+        z-index: 9999;
+        display: flex; align-items: center; justify-content: center;
+        cursor: zoom-out;
+    }
+    .gg-modal img {
+        max-width: 95vw; max-height: 95vh;
+        object-fit: contain;
+        border-radius: 2px;
+        box-shadow: 0 0 40px rgba(0,0,0,0.5);
+    }
+
+    /* Print block: hidden on screen, shown by @media print rules below */
+    #gg-print { display: none; }
 
     /* Streamlit expander -> match GG minimal style */
     [data-testid="stExpander"] {
@@ -470,6 +513,7 @@ else:
         "quantity": 0,
         "image_url": "",
         "heights": Counter(),
+        "oldest_date": "",
     })
     for item in kiltie_items:
         key = item["leather"]
@@ -478,8 +522,13 @@ else:
             leather_agg[key]["image_url"] = item["image_url"]
         if item["height"]:
             leather_agg[key]["heights"][item["height"]] += item["quantity"]
+        d = item.get("date") or ""
+        if d and (not leather_agg[key]["oldest_date"] or d < leather_agg[key]["oldest_date"]):
+            leather_agg[key]["oldest_date"] = d
 
     sorted_leathers = sorted(leather_agg.items(), key=lambda x: -x[1]["quantity"])
+
+    today = date.today()
 
     for leather_name, info in sorted_leathers:
         qty = info["quantity"]
@@ -494,28 +543,46 @@ else:
 
         if heights:
             height_pills = "".join(
-                f"<span class='h-pill'>{h} &middot; {c}x</span>"
+                f"<span class='h-pill'>{html.escape(h)} &middot; {c}x</span>"
                 for h, c in sorted(heights.items(), key=lambda x: -x[1])
             )
         else:
             height_pills = "<span class='h-pill'>No height specified</span>"
 
+        age_html = ""
+        od = info.get("oldest_date")
+        if od:
+            try:
+                days = (today - date.fromisoformat(od)).days
+                if days >= 1:
+                    age_html = (
+                        f'<div class="gg-age">{days} '
+                        f'day{"s" if days != 1 else ""} old</div>'
+                    )
+            except ValueError:
+                pass
+
         img_url = info.get("image_url", "")
+        img_url_attr = html.escape(img_url, quote=True)
         thumb = (
-            f"<img class='gg-thumb' src='{img_url}' alt=''>"
+            f"<img class='gg-thumb' src='{img_url_attr}' alt=''>"
             if img_url else "<div class='gg-thumb-empty'></div>"
         )
 
+        name_attr = html.escape(leather_name, quote=True)
+        name_html = html.escape(leather_name)
+
         st.markdown(
             f"""
-            <div class="{card_class}">
+            <div class="{card_class}" data-leather="{name_attr}">
                 {thumb}
                 <div class="gg-body">
                     <div class="gg-row-top">
-                        <div class="gg-leather">{leather_name}</div>
+                        <div class="gg-leather">{name_html}</div>
                         <div class="gg-qty">{qty}<span class="x">x</span></div>
                     </div>
                     <div class="gg-heights">{height_pills}</div>
+                    {age_html}
                 </div>
             </div>
             """,
@@ -523,44 +590,43 @@ else:
         )
 
     # ---------------------------------------------------------------
-    # Print view (collapsed; desktop + print only)
+    # Print view: always rendered, hidden on screen via CSS,
+    # revealed by @media print. Cmd/Ctrl+P just works.
     # ---------------------------------------------------------------
-    with st.expander("Print view"):
-        table_html = (
-            "<table><thead><tr>"
-            "<th style='width:60px;'></th><th>Leather</th><th>Qty</th><th>Heights</th>"
-            "</tr></thead><tbody>"
+    table_html = (
+        "<table><thead><tr>"
+        "<th style='width:60px;'></th><th>Leather</th><th>Qty</th><th>Heights</th>"
+        "</tr></thead><tbody>"
+    )
+    for leather_name, info in sorted(leather_agg.items(), key=lambda x: x[0]):
+        height_parts = [
+            f"{html.escape(h)} x{c}" for h, c in sorted(info["heights"].items())
+        ]
+        height_str = ", ".join(height_parts) if height_parts else "--"
+        img = info.get("image_url", "")
+        img_td = (
+            f"<img src='{html.escape(img, quote=True)}' style='width:50px;"
+            f"height:50px;object-fit:cover;border-radius:2px;'>" if img else ""
         )
-        for leather_name, info in sorted(leather_agg.items(), key=lambda x: x[0]):
-            height_parts = [f"{h} x{c}" for h, c in sorted(info["heights"].items())]
-            height_str = ", ".join(height_parts) if height_parts else "--"
-            img = info.get("image_url", "")
-            img_td = (
-                f"<img src='{img}' style='width:50px;height:50px;"
-                f"object-fit:cover;border-radius:2px;'>" if img else ""
-            )
-            table_html += (
-                f"<tr><td>{img_td}</td>"
-                f"<td><strong>{leather_name}</strong></td>"
-                f"<td>{info['quantity']}</td>"
-                f"<td>{height_str}</td></tr>"
-            )
-        table_html += "</tbody></table>"
+        table_html += (
+            f"<tr><td>{img_td}</td>"
+            f"<td><strong>{html.escape(leather_name)}</strong></td>"
+            f"<td>{info['quantity']}</td>"
+            f"<td>{height_str}</td></tr>"
+        )
+    table_html += "</tbody></table>"
 
-        st.markdown(
-            f"""
-            <div id="gg-print">
-                <h2>Kiltie Cut List</h2>
-                <div class="print-date">{datetime.now().strftime('%B %d, %Y')}
-                    | {total_kilties} kilties across {unique_orders} orders</div>
-                {table_html}
-            </div>
-            <p style="font-size:12px;color:var(--gg-muted);margin-top:10px;">
-                Use Ctrl+P / Cmd+P to print. Only this table will print.
-            </p>
-            """,
-            unsafe_allow_html=True,
-        )
+    st.markdown(
+        f"""
+        <div id="gg-print">
+            <h2>Kiltie Cut List</h2>
+            <div class="print-date">{datetime.now().strftime('%B %d, %Y')}
+                | {total_kilties} kilties across {unique_orders} orders</div>
+            {table_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 st.markdown(
     f"""
@@ -571,4 +637,75 @@ st.markdown(
     </div>
     """,
     unsafe_allow_html=True,
+)
+
+# ===================================================================
+# Client-side enhancements:
+#   - tap a card to mark/unmark as cut (persisted in localStorage)
+#   - tap thumbnail to view full-size photo
+#   - iOS "Add to Home Screen" polish via injected meta tags
+#   - auto-refresh every 3 minutes
+# Rendered with st.html so the script executes in the parent DOM.
+# ===================================================================
+
+st.html(
+    """
+    <script>
+    (function () {
+      const KEY = 'gg-cut-leathers';
+      const cut = new Set(JSON.parse(localStorage.getItem(KEY) || '[]'));
+      const persist = () => localStorage.setItem(KEY, JSON.stringify([...cut]));
+
+      function showModal(src) {
+        const m = document.createElement('div');
+        m.className = 'gg-modal';
+        const img = document.createElement('img');
+        img.src = src;
+        m.appendChild(img);
+        m.addEventListener('click', () => m.remove());
+        document.body.appendChild(m);
+      }
+
+      function wire() {
+        document.querySelectorAll('.gg-card[data-leather]').forEach(card => {
+          const name = card.dataset.leather;
+          if (cut.has(name)) card.classList.add('cut');
+          card.querySelectorAll('.gg-thumb').forEach(t => {
+            t.onclick = (e) => { e.stopPropagation(); showModal(t.src); };
+          });
+          card.onclick = () => {
+            if (cut.has(name)) { cut.delete(name); card.classList.remove('cut'); }
+            else                { cut.add(name);    card.classList.add('cut'); }
+            persist();
+          };
+        });
+      }
+
+      // iOS home-screen polish
+      [
+        ['apple-mobile-web-app-capable', 'yes'],
+        ['apple-mobile-web-app-status-bar-style', 'black-translucent'],
+        ['apple-mobile-web-app-title', 'Cut List'],
+        ['theme-color', '#faf7f2'],
+      ].forEach(([n, c]) => {
+        if (!document.querySelector('meta[name="' + n + '"]')) {
+          const m = document.createElement('meta');
+          m.name = n; m.content = c;
+          document.head.appendChild(m);
+        }
+      });
+
+      // Auto-refresh once every 3 minutes (guard so reruns don't stack timers)
+      if (!window.__ggReload) {
+        window.__ggReload = setTimeout(() => location.reload(), 180000);
+      }
+
+      wire();
+      // Streamlit reruns may rebuild cards -- re-wire when DOM changes.
+      new MutationObserver(wire).observe(
+        document.body, { childList: true, subtree: true }
+      );
+    })();
+    </script>
+    """
 )
